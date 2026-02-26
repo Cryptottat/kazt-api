@@ -3,6 +3,7 @@ Redis 연결 모듈
 redis.asyncio 기반
 """
 import os
+import asyncio
 from typing import Optional
 from src.utils.logger import logger
 
@@ -32,10 +33,14 @@ async def init_redis() -> None:
         _redis = aioredis.from_url(
             redis_url,
             decode_responses=True,
+            socket_connect_timeout=10,
         )
-        # 연결 테스트
-        await _redis.ping()
+        # 연결 테스트 (타임아웃 포함)
+        await asyncio.wait_for(_redis.ping(), timeout=10)
         logger.info("Redis 연결 완료")
+    except asyncio.TimeoutError:
+        logger.error("Redis 연결 타임아웃 (10초) -- 캐시 없이 동작")
+        _redis = None
     except Exception as e:
         logger.error(f"Redis 연결 실패: {e}")
         _redis = None

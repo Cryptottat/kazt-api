@@ -3,6 +3,7 @@ PostgreSQL 연결 + 테이블 생성 모듈
 asyncpg 기반 Raw SQL, ORM 미사용
 """
 import os
+import asyncio
 from typing import Optional
 from src.utils.logger import logger
 
@@ -95,10 +96,13 @@ async def init_database() -> None:
         return
 
     try:
-        _pool = await asyncpg.create_pool(
-            database_url,
-            min_size=2,
-            max_size=10,
+        _pool = await asyncio.wait_for(
+            asyncpg.create_pool(
+                database_url,
+                min_size=1,
+                max_size=10,
+            ),
+            timeout=15,
         )
         logger.info("PostgreSQL 커넥션 풀 생성 완료")
 
@@ -108,6 +112,9 @@ async def init_database() -> None:
             await conn.execute(_CREATE_INDEXES_SQL)
         logger.info("데이터베이스 테이블/인덱스 초기화 완료")
 
+    except asyncio.TimeoutError:
+        logger.error("PostgreSQL 연결 타임아웃 (15초) -- DB 없이 in-memory 모드로 동작")
+        _pool = None
     except Exception as e:
         logger.error(f"PostgreSQL 연결 실패: {e}")
         _pool = None
