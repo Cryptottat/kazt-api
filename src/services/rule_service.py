@@ -13,7 +13,7 @@ class RuleService:
     """ACE 규칙 검증 및 시뮬레이션 엔진"""
 
     def __init__(self):
-        # In-memory storage (Phase 5에서 PostgreSQL로 교체)
+        # In-memory 폴백 저장소 (DB 미연결시 사용)
         self.saved_rules: dict[str, dict] = {}
 
     def validate(self, blocks: list[RuleBlock]) -> ValidateResponse:
@@ -241,28 +241,98 @@ class RuleService:
             conflicts=[],
         )
 
-    def save_rule_set(self, rule_set: RuleSetCreate, owner: str) -> dict:
-        """규칙 세트를 저장한다 (인메모리)."""
+    async def save_rule_set(self, rule_set: RuleSetCreate, owner: str) -> dict:
+        """규칙 세트를 저장한다. DB 연결시 DB에, 미연결시 in-memory에 저장."""
+        from src.services import db_service
+        from src.services import cache_service
+
         rule_id = uuid.uuid4().hex[:12]
         now = int(time.time())
+        blocks_data = [b.model_dump() for b in rule_set.blocks]
+
         data = {
             "id": rule_id,
             "name": rule_set.name,
             "description": rule_set.description,
-            "blocks": [b.model_dump() for b in rule_set.blocks],
+            "blocks": blocks_data,
             "owner": owner,
             "created_at": now,
             "updated_at": now,
         }
+
+        # DB에 저장 시도
+        db_result = await db_service.save_rule_set(
+            id=rule_id,
+            name=rule_set.name,
+            description=rule_set.description,
+            blocks=blocks_data,
+            owner=owner,
+        )
+
+        if db_result is not None:
+            # DB 저장 성공 -- 캐시에도 저장
+            cache_key = f"kazt:ruleset:{rule_id}"
+            await cache_service.set(cache_key, db_result, ttl=cache_service.TTL_RULE_SET)
+            # DB 결과의 날짜 필드를 직렬화 가능하게 변환
+            result = {}
+            for k, v in db_result.items():
+                if hasattr(v, "isoformat"):
+                    result[k] = v.isoformat()
+                else:
+                    result[k] = v
+            return result
+
+        # DB 미연결 -- in-memory 폴백
         self.saved_rules[rule_id] = data
         return data
 
-    def get_rule_set(self, rule_id: str) -> Optional[dict]:
-        """규칙 세트를 조회한다."""
+    async def get_rule_set(self, rule_id: str) -> Optional[dict]:
+        """규칙 세트를 조회한다. 캐시 -> DB -> in-memory 순으로 조회."""
+        from src.services import cache_service
+        from src.services import db_service
+
+        cache_key = f"kazt:ruleset:{rule_id}"
+
+        # 캐시 또는 DB에서 조회
+        async def _fetch_from_db():
+            return await db_service.get_rule_set(rule_id)
+
+        db_result = await cache_service.get_or_fetch(
+            cache_key, _fetch_from_db, ttl=cache_service.TTL_RULE_SET
+        )
+
+        if db_result is not None:
+            # 날짜 필드 직렬화
+            result = {}
+            for k, v in db_result.items():
+                if hasattr(v, "isoformat"):
+                    result[k] = v.isoformat()
+                else:
+                    result[k] = v
+            return result
+
+        # In-memory 폴백
         return self.saved_rules.get(rule_id)
 
-    def get_user_rules(self, owner: str) -> list[dict]:
-        """사용자의 규칙 목록을 조회한다."""
+    async def get_user_rules(self, owner: str) -> list[dict]:
+        """사용자의 규칙 목록을 조회한다. DB -> in-memory 순으로 조회."""
+        from src.services import db_service
+
+        # DB에서 조회 시도
+        db_results = await db_service.get_user_rule_sets(owner)
+        if db_results:
+            results = []
+            for row in db_results:
+                r = {}
+                for k, v in row.items():
+                    if hasattr(v, "isoformat"):
+                        r[k] = v.isoformat()
+                    else:
+                        r[k] = v
+                results.append(r)
+            return results
+
+        # In-memory 폴백
         return [r for r in self.saved_rules.values() if r["owner"] == owner]
 
     def export_rules(self, blocks: list[RuleBlock], fmt: str = "json") -> dict:

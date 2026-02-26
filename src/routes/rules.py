@@ -58,7 +58,7 @@ async def save_rules(
             detail=f"Save is not available for {tier_info['tier']} tier. Upgrade to Basic or above.",
         )
 
-    result = rule_service.save_rule_set(req, owner=key_data["wallet"])
+    result = await rule_service.save_rule_set(req, owner=key_data["wallet"])
     return APIResponse(success=True, data=result)
 
 
@@ -72,14 +72,14 @@ async def my_rules(x_api_key: Optional[str] = Header(None)):
     if not key_data:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    rules = rule_service.get_user_rules(key_data["wallet"])
+    rules = await rule_service.get_user_rules(key_data["wallet"])
     return APIResponse(success=True, data=rules)
 
 
 @router.get("/{rule_id}", response_model=APIResponse)
 async def get_rule(rule_id: str):
     """규칙 세트 단일 조회"""
-    rule = rule_service.get_rule_set(rule_id)
+    rule = await rule_service.get_rule_set(rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Rule set not found")
     return APIResponse(success=True, data=rule)

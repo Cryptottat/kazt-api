@@ -7,14 +7,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.routes import auth, rules, templates
+from src.routes import auth, rules, templates, deploy, chain
 from src.utils.logger import logger
+from src.database import init_database, close_database
+from src.cache import init_redis, close_redis
+from src.services.solana_service import solana_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Kazt API starting up...")
+    # DB + Redis 초기화
+    await init_database()
+    await init_redis()
     yield
+    # Solana 서비스 + DB + Redis 종료
+    await solana_service.close()
+    await close_redis()
+    await close_database()
     logger.info("Kazt API shutting down...")
 
 
@@ -39,6 +49,8 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(rules.router, prefix="/api/rules", tags=["rules"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
+app.include_router(deploy.router, prefix="/api/deploy", tags=["deploy"])
+app.include_router(chain.router, prefix="/api/chain", tags=["chain"])
 
 
 @app.get("/health")
