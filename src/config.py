@@ -15,10 +15,11 @@ class Config:
     HELIUS_RPC_URL = os.getenv("HELIUS_RPC_URL", "https://api.mainnet-beta.solana.com")
     TOKEN_CA = os.getenv("TOKEN_CA", "")
 
-    # Tier thresholds (% of total supply)
-    TIER_ELITE_THRESHOLD = float(os.getenv("TIER_ELITE_THRESHOLD", "0.0005"))
-    TIER_PRO_THRESHOLD = float(os.getenv("TIER_PRO_THRESHOLD", "0.0001"))
-    TIER_BASIC_THRESHOLD = float(os.getenv("TIER_BASIC_THRESHOLD", "0.00001"))
+    # Tier thresholds (% of total supply, 1B = 1,000,000,000)
+    TIER_WHALE_THRESHOLD = float(os.getenv("TIER_WHALE_THRESHOLD", "0.025"))    # 25,000,000
+    TIER_ELITE_THRESHOLD = float(os.getenv("TIER_ELITE_THRESHOLD", "0.005"))    # 5,000,000
+    TIER_PRO_THRESHOLD = float(os.getenv("TIER_PRO_THRESHOLD", "0.001"))        # 1,000,000
+    TIER_BASIC_THRESHOLD = float(os.getenv("TIER_BASIC_THRESHOLD", "0.0001"))   # 100,000
 
     # Rate limits (per day)
     TIER_FREE_LIMIT = int(os.getenv("TIER_FREE_LIMIT", "3"))
