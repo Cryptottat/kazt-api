@@ -13,10 +13,10 @@ from src.utils.logger import logger
 
 # 티어 임계값 (KAZT 토큰 수량)
 TIER_THRESHOLDS = [
-    (1_000_000, "whale"),
-    (100_000, "elite"),
-    (10_000, "pro"),
-    (1_000, "basic"),
+    (25_000_000, "whale"),
+    (5_000_000, "elite"),
+    (1_000_000, "pro"),
+    (100_000, "basic"),
 ]
 
 
