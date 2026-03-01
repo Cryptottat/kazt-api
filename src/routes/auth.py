@@ -23,16 +23,21 @@ async def connect_wallet(req: ConnectRequest):
 
 @router.get("/verify", response_model=APIResponse)
 async def verify_api_key(x_api_key: Optional[str] = Header(None)):
-    """API 키 검증 + 티어 정보 반환"""
+    """API 키 검증 + 온체인 티어 실시간 갱신"""
     if not x_api_key:
-        return APIResponse(
-            success=True,
-            data={"tier": "free", "daily_limit": 3, "used_today": 0, "features": ["design", "simulate"]},
-        )
+        raise HTTPException(status_code=401, detail="API key required")
 
-    key_data = await auth_service.verify_api_key(x_api_key)
+    key_data = await auth_service.verify_and_refresh_tier(x_api_key)
     if not key_data:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    tier_info = auth_service.get_tier_info(x_api_key)
-    return APIResponse(success=True, data=tier_info)
+    tier = key_data.get("tier", "free")
+    limit = auth_service.TIER_LIMITS.get(tier, 3)
+    features = auth_service.TIER_FEATURES.get(tier, [])
+
+    return APIResponse(success=True, data={
+        "wallet": key_data.get("wallet", ""),
+        "tier": tier,
+        "daily_limit": limit,
+        "features": features,
+    })

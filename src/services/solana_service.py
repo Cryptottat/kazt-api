@@ -33,8 +33,8 @@ class SolanaService:
 
     @property
     def is_configured(self) -> bool:
-        """RPC URL이 설정되어 있는지 확인"""
-        return bool(self.rpc_url) and self.rpc_url != "https://api.mainnet-beta.solana.com"
+        """RPC URL이 설정되어 있는지 확인 (mainnet-beta도 허용)"""
+        return bool(self.rpc_url)
 
     def _get_client(self) -> RateLimitedClient:
         """HTTP 클라이언트 lazy 초기화"""

@@ -2,6 +2,11 @@ import os
 import secrets
 import time
 from typing import Optional
+
+import base58
+from nacl.signing import VerifyKey
+from nacl.exceptions import BadSignatureError
+
 from src.utils.logger import logger
 from src.config import config
 
@@ -33,14 +38,56 @@ class AuthService:
     def generate_api_key(self) -> str:
         return secrets.token_urlsafe(32)
 
+    async def check_ip_lock(self, api_key: str, client_ip: str) -> bool:
+        """
+        IP 잠금 확인. 첫 사용 시 IP 잠금, 이후 다른 IP 차단.
+        Returns True if allowed, False if IP mismatch.
+        Redis 미연결 시 항상 허용.
+        """
+        from src.services import cache_service
+
+        lock_key = f"kazt:iplock:{api_key}"
+        locked_ip = await cache_service.get(lock_key)
+
+        if locked_ip is None:
+            # 첫 사용 -- IP 잠금 (24시간)
+            await cache_service.set(lock_key, client_ip, ttl=86400)
+            return True
+
+        return locked_ip == client_ip
+
+    def _verify_signature(self, wallet: str, signature: str, message: str) -> bool:
+        """ed25519 서명 검증"""
+        try:
+            pubkey_bytes = base58.b58decode(wallet)
+            sig_bytes = base58.b58decode(signature)
+            verify_key = VerifyKey(pubkey_bytes)
+            verify_key.verify(message.encode("utf-8"), sig_bytes)
+            return True
+        except (BadSignatureError, Exception) as e:
+            logger.warning(f"서명 검증 실패 (wallet={wallet[:8]}...): {e}")
+            return False
+
     async def connect_wallet(self, wallet: str, signature: str, message: str) -> dict:
         """지갑 서명 인증 후 API 키 발급"""
-        # 서명 검증 (MVP는 간소화 -- 실제 구현에서는 PyNaCl로 ed25519 서명 검증)
+        # ed25519 서명 검증
+        if not self._verify_signature(wallet, signature, message):
+            raise ValueError("Invalid signature")
+
         logger.info(f"Wallet connect: {wallet[:8]}...")
+
+        # 토큰 잔액 조회 + 티어 결정
+        balance = 0.0
+        try:
+            from src.services.solana_service import solana_service
+            balance = await solana_service.get_token_balance(wallet)
+        except Exception as e:
+            logger.warning(f"토큰 잔액 조회 실패: {e}")
 
         # API 키 생성
         api_key = self.generate_api_key()
         tier = await self.determine_tier(wallet)
+        limit = self.TIER_LIMITS.get(tier, 3)
 
         # In-memory 저장 (폴백용)
         self.api_keys[api_key] = {
@@ -57,6 +104,9 @@ class AuthService:
             "api_key": api_key,
             "wallet": wallet,
             "tier": tier,
+            "balance": balance,
+            "daily_limit": limit,
+            "features": self.TIER_FEATURES.get(tier, []),
         }
 
     async def verify_api_key(self, api_key: str) -> Optional[dict]:
@@ -83,12 +133,43 @@ class AuthService:
                     else db_user["created_at"]
                 ),
             }
-            # 캐시에 저장 (24시간)
-            await cache_service.set(cache_key, result, ttl=cache_service.TTL_SESSION)
+            # 캐시에 저장 (5분 -- 실시간 검증 방식이므로 짧게)
+            await cache_service.set(cache_key, result, ttl=300)
             return result
 
         # 3. In-memory 폴백
         return self.api_keys.get(api_key)
+
+    async def verify_and_refresh_tier(self, api_key: str) -> Optional[dict]:
+        """
+        API 키 검증 + 온체인 잔액으로 티어 실시간 갱신.
+        앱 실행 시, AI 요청 시마다 호출.
+        """
+        from src.services import cache_service, db_service
+
+        key_data = await self.verify_api_key(api_key)
+        if not key_data:
+            return None
+
+        wallet = key_data.get("wallet")
+        if not wallet:
+            return key_data
+
+        # 온체인 잔액으로 티어 재결정 (solana_service 내부에 5분 캐시 있음)
+        new_tier = await self.determine_tier(wallet)
+        old_tier = key_data.get("tier", "free")
+
+        if new_tier != old_tier:
+            key_data["tier"] = new_tier
+            # DB + 캐시 갱신
+            await db_service.upsert_user(wallet=wallet, tier=new_tier)
+            await cache_service.delete(f"kazt:session:{api_key}")
+            # in-memory도 갱신
+            if api_key in self.api_keys:
+                self.api_keys[api_key]["tier"] = new_tier
+            logger.info(f"티어 실시간 갱신: {wallet[:8]}... {old_tier} -> {new_tier}")
+
+        return key_data
 
     async def determine_tier(self, wallet: str) -> str:
         """
