@@ -11,6 +11,19 @@ from src.utils.logger import logger
 from src.config import config
 
 
+# 테스트/개발용 무적 키 (환경변수 또는 하드코딩)
+_TEST_API_KEYS: dict[str, dict] = {}
+
+_test_key_val = os.getenv("TEST_API_KEY")
+if _test_key_val:
+    _TEST_API_KEYS[_test_key_val] = {
+        "wallet": "TEST_WALLET_000000000000000000000000",
+        "tier": "whale",
+        "created_at": 0,
+        "_test": True,
+    }
+
+
 class AuthService:
     """지갑 인증 + API 키 관리 + 티어 시스템"""
 
@@ -42,8 +55,11 @@ class AuthService:
         """
         IP 잠금 확인. 첫 사용 시 IP 잠금, 이후 다른 IP 차단.
         Returns True if allowed, False if IP mismatch.
-        Redis 미연결 시 항상 허용.
+        Redis 미연결 시 항상 허용. 테스트 키는 항상 허용.
         """
+        if api_key in _TEST_API_KEYS:
+            return True
+
         from src.services import cache_service
 
         lock_key = f"kazt:iplock:{api_key}"
@@ -110,7 +126,11 @@ class AuthService:
         }
 
     async def verify_api_key(self, api_key: str) -> Optional[dict]:
-        """API 키 검증 -- 캐시 -> DB -> in-memory 순으로 조회"""
+        """API 키 검증 -- 테스트키 -> 캐시 -> DB -> in-memory 순으로 조회"""
+        # 0. 테스트/개발 무적 키
+        if api_key in _TEST_API_KEYS:
+            return dict(_TEST_API_KEYS[api_key])
+
         from src.services import cache_service
         from src.services import db_service
 
@@ -150,6 +170,10 @@ class AuthService:
         key_data = await self.verify_api_key(api_key)
         if not key_data:
             return None
+
+        # 테스트 키는 온체인 체크 건너뜀
+        if key_data.get("_test"):
+            return key_data
 
         wallet = key_data.get("wallet")
         if not wallet:
