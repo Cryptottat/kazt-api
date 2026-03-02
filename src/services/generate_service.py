@@ -7,7 +7,7 @@ Uses Claude API when available, falls back to template-based generation.
 import re
 import os
 import json
-from typing import Optional
+from typing import Optional, AsyncGenerator
 
 from src.utils.logger import logger
 from src.models.generate import GeneratedFile
@@ -242,6 +242,125 @@ codegen-units = 1'''
         ],
         "test_count": 4,
     }
+
+
+async def ai_generate_stream(description: str) -> AsyncGenerator[dict, None]:
+    """
+    Stream AI generation progress as an async generator.
+    Yields events: start, progress (every ~500 chars), complete, error.
+    Falls back to template on failure.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+    if not api_key:
+        yield {"type": "start", "message": "Using template generation..."}
+        result = _generate_template(description)
+        yield {
+            "type": "complete",
+            "message": f'Program "{result["name"]}" generated. {len(result["files"])} files created.',
+            "data": result,
+        }
+        return
+
+    yield {"type": "start", "message": "Analyzing your request..."}
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            async with client.stream(
+                "POST",
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 8000,
+                    "stream": True,
+                    "system": SYSTEM_PROMPT,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": f"Generate a Solana program for: {description}",
+                        }
+                    ],
+                },
+            ) as response:
+                response.raise_for_status()
+
+                accumulated_text = ""
+                last_reported = 0
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+
+                    try:
+                        event = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    event_type = event.get("type")
+
+                    if event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        text = delta.get("text", "")
+                        accumulated_text += text
+
+                        current_chars = len(accumulated_text)
+                        if current_chars - last_reported >= 500:
+                            last_reported = current_chars
+                            yield {
+                                "type": "progress",
+                                "chars": current_chars,
+                                "message": f"Forging program... {current_chars:,} chars generated",
+                            }
+
+                    elif event_type == "message_stop":
+                        break
+
+                # Parse the accumulated text
+                json_match = re.search(r"\{[\s\S]*\}", accumulated_text)
+                if not json_match:
+                    raise ValueError("No valid JSON in AI response")
+
+                result = json.loads(json_match.group())
+                result["description"] = description
+
+                if "files" in result:
+                    for f in result["files"]:
+                        if "filename" in f and "path" not in f:
+                            f["path"] = f.pop("filename")
+                        if "path" not in f:
+                            f["path"] = "unknown"
+
+                logger.info(
+                    f"Stream generation success: name={result.get('name')}, "
+                    f"files={len(result.get('files', []))}"
+                )
+                yield {
+                    "type": "complete",
+                    "message": f'Program "{result.get("name")}" generated. {len(result.get("files", []))} files created.',
+                    "data": result,
+                }
+
+    except Exception as e:
+        logger.error(f"Stream generation failed: {e}", exc_info=True)
+        yield {"type": "error", "message": str(e)}
+        # Fallback to template
+        result = _generate_template(description)
+        yield {
+            "type": "complete",
+            "message": f'Program "{result["name"]}" generated (template fallback). {len(result["files"])} files created.',
+            "data": result,
+        }
 
 
 async def generate_program(description: str) -> dict:
