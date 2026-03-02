@@ -30,6 +30,14 @@ class AuthService:
         "whale": -1,
     }
 
+    BUILD_LIMITS = {
+        "free": 1,
+        "basic": 3,
+        "pro": 10,
+        "elite": 50,
+        "whale": -1,
+    }
+
     def __init__(self):
         # In-memory 폴백 저장소 (DB/Redis 미연결시 사용)
         self.api_keys: dict[str, dict] = {}
@@ -245,6 +253,29 @@ class AuthService:
 
         # Redis 미연결 -- in-memory 폴백
         return self.check_rate_limit(api_key)
+
+    async def check_build_limit(self, api_key: str, tier: str) -> tuple[bool, int, int]:
+        """
+        빌드 전용 일일 한도 체크.
+        Returns (allowed, used, limit).
+        """
+        from src.services import cache_service
+
+        limit = self.BUILD_LIMITS.get(tier, 1)
+        if limit == -1:
+            return True, 0, -1
+
+        today = time.strftime("%Y-%m-%d")
+        build_key = f"kazt:build:{api_key}:{today}"
+        count = await cache_service.increment(build_key, ttl=86400)
+
+        if count > 0:
+            if count > limit:
+                return False, count, limit
+            return True, count, limit
+
+        # Redis 미연결 -- 허용 (in-memory 폴백 간소화)
+        return True, 0, limit
 
     def increment_usage(self, api_key: Optional[str] = None):
         """사용량 증가 (in-memory)"""
