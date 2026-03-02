@@ -92,7 +92,7 @@ class AutofixRequest(BaseModel):
     files: list[FileInput] = Field(min_length=1, max_length=20)
     validate_result: dict
     max_attempts: int = Field(default=1, ge=1, le=5)
-    attempt_offset: int = Field(default=0, ge=0, le=4)
+    attempt_offset: int = Field(default=0, ge=0)
 
 
 AUTOFIX_TIERS = {"pro", "elite", "whale"}
