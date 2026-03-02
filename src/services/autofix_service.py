@@ -165,7 +165,14 @@ async def autofix_stream(
                         "messages": [{"role": "user", "content": user_message}],
                     },
                 )
-                response.raise_for_status()
+                if response.status_code != 200:
+                    error_body = response.text
+                    logger.error(f"Anthropic API error {response.status_code}: {error_body}")
+                    raise httpx.HTTPStatusError(
+                        f"Anthropic API {response.status_code}: {error_body[:500]}",
+                        request=response.request,
+                        response=response,
+                    )
 
                 data = response.json()
                 content = data["content"][0]["text"]
