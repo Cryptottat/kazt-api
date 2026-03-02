@@ -45,6 +45,41 @@ Respond ONLY with valid JSON in this exact format:
 }"""
 
 
+def _extract_json(text: str) -> dict:
+    """
+    Claude 응답에서 JSON 객체를 추출한다.
+    Claude가 ```json ... ``` 블록으로 감싸는 경우, 코드 안에 이스케이프 안 된
+    문자가 있는 경우 등을 처리한다.
+    """
+    # 1) ```json ... ``` 블록이 있으면 그 안의 내용만 추출
+    fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 2) json.raw_decode로 첫 번째 유효한 JSON 객체만 파싱 (뒤의 ``` 등 무시)
+    start_idx = text.find("{")
+    if start_idx != -1:
+        decoder = json.JSONDecoder()
+        try:
+            result, _ = decoder.raw_decode(text, start_idx)
+            return result
+        except json.JSONDecodeError:
+            pass
+
+    # 3) 마지막 } 까지 greedy 매칭 후 시도
+    json_match = re.search(r"\{[\s\S]*\}", text)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError("No valid JSON in AI response")
+
+
 def _sanitize_name(description: str) -> str:
     """Extract a clean program name from description."""
     words = re.sub(r"[^a-zA-Z0-9\s]", "", description).split()[:3]
@@ -278,7 +313,7 @@ async def ai_generate_stream(description: str) -> AsyncGenerator[dict, None]:
                 },
                 json={
                     "model": "claude-sonnet-4-6",
-                    "max_tokens": 8000,
+                    "max_tokens": 16000,
                     "stream": True,
                     "system": SYSTEM_PROMPT,
                     "messages": [
@@ -328,41 +363,7 @@ async def ai_generate_stream(description: str) -> AsyncGenerator[dict, None]:
 
                 # Parse the accumulated text
                 logger.info(f"Stream complete: {len(accumulated_text)} chars accumulated")
-                # Find balanced JSON object — match first { to its matching }
-                start_idx = accumulated_text.find("{")
-                if start_idx == -1:
-                    raise ValueError("No JSON object found in AI response")
-
-                depth = 0
-                in_string = False
-                escape_next = False
-                end_idx = -1
-                for i in range(start_idx, len(accumulated_text)):
-                    c = accumulated_text[i]
-                    if escape_next:
-                        escape_next = False
-                        continue
-                    if c == "\\":
-                        if in_string:
-                            escape_next = True
-                        continue
-                    if c == '"' and not escape_next:
-                        in_string = not in_string
-                        continue
-                    if in_string:
-                        continue
-                    if c == "{":
-                        depth += 1
-                    elif c == "}":
-                        depth -= 1
-                        if depth == 0:
-                            end_idx = i
-                            break
-
-                if end_idx == -1:
-                    raise ValueError("No balanced JSON object in AI response")
-
-                result = json.loads(accumulated_text[start_idx : end_idx + 1])
+                result = _extract_json(accumulated_text)
                 result["description"] = description
 
                 if "files" in result:
@@ -424,7 +425,7 @@ async def _ai_generate(description: str, api_key: str) -> dict:
             },
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 8000,
+                "max_tokens": 16000,
                 "system": SYSTEM_PROMPT,
                 "messages": [
                     {
@@ -440,11 +441,7 @@ async def _ai_generate(description: str, api_key: str) -> dict:
         content = data["content"][0]["text"]
 
         # Extract JSON from response
-        json_match = re.search(r"\{[\s\S]*\}", content)
-        if not json_match:
-            raise ValueError("No valid JSON in AI response")
-
-        result = json.loads(json_match.group())
+        result = _extract_json(content)
         result["description"] = description
 
         # Normalize file fields — Claude might use "filename" instead of "path"
