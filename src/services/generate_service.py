@@ -327,11 +327,42 @@ async def ai_generate_stream(description: str) -> AsyncGenerator[dict, None]:
                         break
 
                 # Parse the accumulated text
-                json_match = re.search(r"\{[\s\S]*\}", accumulated_text)
-                if not json_match:
-                    raise ValueError("No valid JSON in AI response")
+                logger.info(f"Stream complete: {len(accumulated_text)} chars accumulated")
+                # Find balanced JSON object — match first { to its matching }
+                start_idx = accumulated_text.find("{")
+                if start_idx == -1:
+                    raise ValueError("No JSON object found in AI response")
 
-                result = json.loads(json_match.group())
+                depth = 0
+                in_string = False
+                escape_next = False
+                end_idx = -1
+                for i in range(start_idx, len(accumulated_text)):
+                    c = accumulated_text[i]
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    if c == "\\":
+                        if in_string:
+                            escape_next = True
+                        continue
+                    if c == '"' and not escape_next:
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
+                    if c == "{":
+                        depth += 1
+                    elif c == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end_idx = i
+                            break
+
+                if end_idx == -1:
+                    raise ValueError("No balanced JSON object in AI response")
+
+                result = json.loads(accumulated_text[start_idx : end_idx + 1])
                 result["description"] = description
 
                 if "files" in result:
