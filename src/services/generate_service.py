@@ -313,7 +313,7 @@ async def ai_generate_stream(description: str) -> AsyncGenerator[dict, None]:
                 },
                 json={
                     "model": "claude-sonnet-4-6",
-                    "max_tokens": 16000,
+                    "max_tokens": 32000,
                     "stream": True,
                     "system": SYSTEM_PROMPT,
                     "messages": [
@@ -425,7 +425,7 @@ async def _ai_generate(description: str, api_key: str) -> dict:
             },
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 16000,
+                "max_tokens": 32000,
                 "system": SYSTEM_PROMPT,
                 "messages": [
                     {
