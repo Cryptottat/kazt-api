@@ -255,7 +255,7 @@ async def generate_program(description: str) -> dict:
         try:
             return await _ai_generate(description, api_key)
         except Exception as e:
-            logger.warning(f"AI generation failed, using template fallback: {e}")
+            logger.error(f"AI generation failed: {e}", exc_info=True)
 
     return _generate_template(description)
 
@@ -264,7 +264,7 @@ async def _ai_generate(description: str, api_key: str) -> dict:
     """Generate using Claude API."""
     import httpx
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         response = await client.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -296,4 +296,14 @@ async def _ai_generate(description: str, api_key: str) -> dict:
 
         result = json.loads(json_match.group())
         result["description"] = description
+
+        # Normalize file fields — Claude might use "filename" instead of "path"
+        if "files" in result:
+            for f in result["files"]:
+                if "filename" in f and "path" not in f:
+                    f["path"] = f.pop("filename")
+                if "path" not in f:
+                    f["path"] = "unknown"
+
+        logger.info(f"AI generation success: name={result.get('name')}, files={len(result.get('files', []))}")
         return result

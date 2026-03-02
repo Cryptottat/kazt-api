@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.config import config
-from src.routes import auth, rules, templates, deploy, chain, generate
+from src.routes import auth, rules, templates, deploy, chain, generate, validate
 from src.utils.logger import logger
 from src.database import init_database, close_database, get_pool
 from src.cache import init_redis, close_redis, get_redis
@@ -79,6 +79,7 @@ app.include_router(templates.router, prefix="/api/templates", tags=["templates"]
 app.include_router(deploy.router, prefix="/api/deploy", tags=["deploy"])
 app.include_router(chain.router, prefix="/api/chain", tags=["chain"])
 app.include_router(generate.router, prefix="/api/generate", tags=["generate"])
+app.include_router(validate.router, prefix="/api/validate", tags=["validate"])
 
 
 @app.get("/health")
