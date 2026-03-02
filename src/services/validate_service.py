@@ -55,8 +55,8 @@ async def validate_code(files: list[dict]) -> dict:
 
 
 async def _ai_validate(files: list[dict], api_key: str) -> dict:
-    """Validate using Claude API."""
-    import httpx
+    """Validate using AI (Anthropic → OpenRouter fallback)."""
+    from src.services.ai_client import chat
 
     # Build file content for the prompt
     file_contents = []
@@ -65,50 +65,30 @@ async def _ai_validate(files: list[dict], api_key: str) -> dict:
 
     user_message = "Analyze these Anchor program files:\n\n" + "\n\n".join(file_contents)
 
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        response = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 4000,
-                "system": VALIDATE_PROMPT,
-                "messages": [
-                    {"role": "user", "content": user_message}
-                ],
-            },
-        )
-        response.raise_for_status()
+    content = await chat(system=VALIDATE_PROMPT, user_message=user_message, max_tokens=4000)
 
-        data = response.json()
-        content = data["content"][0]["text"]
+    # Extract JSON from response
+    json_match = re.search(r"\{[\s\S]*\}", content)
+    if not json_match:
+        raise ValueError("No valid JSON in AI validation response")
 
-        # Extract JSON from response
-        json_match = re.search(r"\{[\s\S]*\}", content)
-        if not json_match:
-            raise ValueError("No valid JSON in AI validation response")
+    result = json.loads(json_match.group())
 
-        result = json.loads(json_match.group())
+    # Ensure required fields exist
+    if "build" not in result:
+        result["build"] = {"status": "pass", "errors": [], "warnings": []}
+    if "tests" not in result:
+        result["tests"] = []
+    if "security" not in result:
+        result["security"] = []
+    if "summary" not in result:
+        result["summary"] = "Validation completed."
 
-        # Ensure required fields exist
-        if "build" not in result:
-            result["build"] = {"status": "pass", "errors": [], "warnings": []}
-        if "tests" not in result:
-            result["tests"] = []
-        if "security" not in result:
-            result["security"] = []
-        if "summary" not in result:
-            result["summary"] = "Validation completed."
-
-        logger.info(
-            f"AI validation: build={result['build']['status']}, "
-            f"tests={len(result['tests'])}, security={len(result['security'])}"
-        )
-        return result
+    logger.info(
+        f"AI validation: build={result['build']['status']}, "
+        f"tests={len(result['tests'])}, security={len(result['security'])}"
+    )
+    return result
 
 
 def _static_validate(files: list[dict]) -> dict:

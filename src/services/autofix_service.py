@@ -5,7 +5,6 @@ Build/Test 실패 시 에러를 분석하고 Claude에게 수정을 요청하여
 최대 MAX_ATTEMPTS회 반복.
 """
 
-import os
 import json
 from typing import AsyncGenerator
 
@@ -107,11 +106,6 @@ async def autofix_stream(
     Auto-fix loop as async generator.
     Yields SSE events for real-time progress.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        yield {"type": "error", "message": "Anthropic API key not configured"}
-        return
-
     current_files = list(files)
     current_result = validate_result
     best_files = list(files)
@@ -122,8 +116,6 @@ async def autofix_stream(
         "message": f"Starting auto-fix. {best_issue_count} issues to resolve.",
         "maxAttempts": MAX_ATTEMPTS,
     }
-
-    import httpx
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         issue_count = _count_issues(current_result)
@@ -150,33 +142,9 @@ async def autofix_stream(
         )
 
         try:
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                response = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={
-                        "model": "claude-sonnet-4-6",
-                        "max_tokens": 32000,
-                        "system": AUTOFIX_PROMPT,
-                        "messages": [{"role": "user", "content": user_message}],
-                    },
-                )
-                if response.status_code != 200:
-                    error_body = response.text
-                    logger.error(f"Anthropic API error {response.status_code}: {error_body}")
-                    raise httpx.HTTPStatusError(
-                        f"Anthropic API {response.status_code}: {error_body[:500]}",
-                        request=response.request,
-                        response=response,
-                    )
-
-                data = response.json()
-                content = data["content"][0]["text"]
-                fix_result = _extract_json(content)
+            from src.services.ai_client import chat
+            content = await chat(system=AUTOFIX_PROMPT, user_message=user_message, max_tokens=32000)
+            fix_result = _extract_json(content)
 
             fixed_files = fix_result.get("files", [])
             changes = fix_result.get("changes", [])

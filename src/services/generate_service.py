@@ -299,89 +299,49 @@ async def ai_generate_stream(description: str) -> AsyncGenerator[dict, None]:
 
     yield {"type": "start", "message": "Analyzing your request..."}
 
-    import httpx
+    from src.services.ai_client import chat_stream
 
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            async with client.stream(
-                "POST",
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-sonnet-4-6",
-                    "max_tokens": 32000,
-                    "stream": True,
-                    "system": SYSTEM_PROMPT,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": f"Generate a Solana program for: {description}",
-                        }
-                    ],
-                },
-            ) as response:
-                response.raise_for_status()
+        accumulated_text = ""
+        last_reported = 0
 
-                accumulated_text = ""
-                last_reported = 0
+        async for text in chat_stream(
+            system=SYSTEM_PROMPT,
+            user_message=f"Generate a Solana program for: {description}",
+            max_tokens=32000,
+        ):
+            accumulated_text += text
 
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        break
-
-                    try:
-                        event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-
-                    event_type = event.get("type")
-
-                    if event_type == "content_block_delta":
-                        delta = event.get("delta", {})
-                        text = delta.get("text", "")
-                        accumulated_text += text
-
-                        current_chars = len(accumulated_text)
-                        if current_chars - last_reported >= 500:
-                            last_reported = current_chars
-                            yield {
-                                "type": "progress",
-                                "chars": current_chars,
-                                "message": f"Forging program... {current_chars:,} chars generated",
-                            }
-
-                    elif event_type == "message_stop":
-                        break
-
-                # Parse the accumulated text
-                logger.info(f"Stream complete: {len(accumulated_text)} chars accumulated")
-                result = _extract_json(accumulated_text)
-                result["description"] = description
-
-                if "files" in result:
-                    for f in result["files"]:
-                        if "filename" in f and "path" not in f:
-                            f["path"] = f.pop("filename")
-                        if "path" not in f:
-                            f["path"] = "unknown"
-
-                logger.info(
-                    f"Stream generation success: name={result.get('name')}, "
-                    f"files={len(result.get('files', []))}"
-                )
+            current_chars = len(accumulated_text)
+            if current_chars - last_reported >= 500:
+                last_reported = current_chars
                 yield {
-                    "type": "complete",
-                    "message": f'Program "{result.get("name")}" generated. {len(result.get("files", []))} files created.',
-                    "data": result,
+                    "type": "progress",
+                    "chars": current_chars,
+                    "message": f"Forging program... {current_chars:,} chars generated",
                 }
+
+        # Parse the accumulated text
+        logger.info(f"Stream complete: {len(accumulated_text)} chars accumulated")
+        result = _extract_json(accumulated_text)
+        result["description"] = description
+
+        if "files" in result:
+            for f in result["files"]:
+                if "filename" in f and "path" not in f:
+                    f["path"] = f.pop("filename")
+                if "path" not in f:
+                    f["path"] = "unknown"
+
+        logger.info(
+            f"Stream generation success: name={result.get('name')}, "
+            f"files={len(result.get('files', []))}"
+        )
+        yield {
+            "type": "complete",
+            "message": f'Program "{result.get("name")}" generated. {len(result.get("files", []))} files created.',
+            "data": result,
+        }
 
     except Exception as e:
         logger.error(f"Stream generation failed: {e}", exc_info=True)
@@ -412,45 +372,26 @@ async def generate_program(description: str) -> dict:
 
 
 async def _ai_generate(description: str, api_key: str) -> dict:
-    """Generate using Claude API."""
-    import httpx
+    """Generate using AI (Anthropic → OpenRouter fallback)."""
+    from src.services.ai_client import chat
 
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        response = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 32000,
-                "system": SYSTEM_PROMPT,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": f"Generate a Solana program for: {description}",
-                    }
-                ],
-            },
-        )
-        response.raise_for_status()
+    content = await chat(
+        system=SYSTEM_PROMPT,
+        user_message=f"Generate a Solana program for: {description}",
+        max_tokens=32000,
+    )
 
-        data = response.json()
-        content = data["content"][0]["text"]
+    # Extract JSON from response
+    result = _extract_json(content)
+    result["description"] = description
 
-        # Extract JSON from response
-        result = _extract_json(content)
-        result["description"] = description
+    # Normalize file fields — Claude might use "filename" instead of "path"
+    if "files" in result:
+        for f in result["files"]:
+            if "filename" in f and "path" not in f:
+                f["path"] = f.pop("filename")
+            if "path" not in f:
+                f["path"] = "unknown"
 
-        # Normalize file fields — Claude might use "filename" instead of "path"
-        if "files" in result:
-            for f in result["files"]:
-                if "filename" in f and "path" not in f:
-                    f["path"] = f.pop("filename")
-                if "path" not in f:
-                    f["path"] = "unknown"
-
-        logger.info(f"AI generation success: name={result.get('name')}, files={len(result.get('files', []))}")
-        return result
+    logger.info(f"AI generation success: name={result.get('name')}, files={len(result.get('files', []))}")
+    return result
