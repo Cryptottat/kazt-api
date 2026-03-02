@@ -91,6 +91,8 @@ async def validate(
 class AutofixRequest(BaseModel):
     files: list[FileInput] = Field(min_length=1, max_length=20)
     validate_result: dict
+    max_attempts: int = Field(default=1, ge=1, le=5)
+    attempt_offset: int = Field(default=0, ge=0, le=4)
 
 
 AUTOFIX_TIERS = {"pro", "elite", "whale"}
@@ -155,7 +157,7 @@ async def autofix(
 
         async def producer():
             try:
-                async for event in autofix_stream(files_data, req.validate_result):
+                async for event in autofix_stream(files_data, req.validate_result, max_attempts=req.max_attempts, attempt_offset=req.attempt_offset):
                     await queue.put(event)
             except Exception as e:
                 await queue.put({"type": "error", "message": str(e)})

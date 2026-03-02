@@ -100,11 +100,17 @@ def _is_all_pass(validate_result: dict) -> bool:
 
 
 async def autofix_stream(
-    files: list[dict], validate_result: dict
+    files: list[dict],
+    validate_result: dict,
+    max_attempts: int = MAX_ATTEMPTS,
+    attempt_offset: int = 0,
 ) -> AsyncGenerator[dict, None]:
     """
     Auto-fix loop as async generator.
     Yields SSE events for real-time progress.
+
+    max_attempts: how many attempts this call should do (default 5, use 1 for per-step mode)
+    attempt_offset: the attempt number to start from (0-based), for display purposes
     """
     current_files = list(files)
     current_result = validate_result
@@ -117,7 +123,8 @@ async def autofix_stream(
         "maxAttempts": MAX_ATTEMPTS,
     }
 
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for i in range(max_attempts):
+        attempt = attempt_offset + i + 1
         issue_count = _count_issues(current_result)
         error_text = _collect_errors(current_result)
 
@@ -203,6 +210,7 @@ async def autofix_stream(
                 "message": f"Build {'PASS' if current_result.get('build', {}).get('status') == 'pass' else 'FAIL'}"
                            + (f" - {new_issue_count} issue{'s' if new_issue_count != 1 else ''} remaining" if not all_pass else ""),
                 "result": current_result,
+                "files": current_files,
             }
 
             if all_pass:
@@ -227,12 +235,13 @@ async def autofix_stream(
             # Continue to next attempt
             continue
 
-    # max attempts reached
+    # max attempts reached (for this batch)
+    final_attempt = attempt_offset + max_attempts
     yield {
         "type": "max_attempts",
-        "attempt": MAX_ATTEMPTS,
+        "attempt": final_attempt,
         "maxAttempts": MAX_ATTEMPTS,
-        "message": f"Could not fix all issues after {MAX_ATTEMPTS} attempts. Applied best result ({best_issue_count} issues remaining).",
+        "message": f"Could not fix all issues after {final_attempt} attempts. Applied best result ({best_issue_count} issues remaining).",
         "files": best_files,
         "result": current_result,
     }
