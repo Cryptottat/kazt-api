@@ -11,7 +11,7 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Model mapping: Anthropic → OpenRouter equivalent
-OPENROUTER_MODEL = "anthropic/claude-sonnet-4"
+OPENROUTER_MODEL = "anthropic/claude-sonnet-4-6"
 
 
 def _get_keys() -> tuple[str, str]:
