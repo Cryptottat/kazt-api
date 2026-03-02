@@ -17,9 +17,9 @@ class AuthService:
     TIER_FEATURES = {
         "free": ["design", "simulate"],
         "basic": ["design", "simulate", "save", "export_json"],
-        "pro": ["design", "simulate", "save", "export_json", "export_anchor", "bam_config"],
-        "elite": ["design", "simulate", "save", "export_json", "export_anchor", "bam_config", "deploy", "templates"],
-        "whale": ["design", "simulate", "save", "export_json", "export_anchor", "bam_config", "deploy", "templates", "priority_support"],
+        "pro": ["design", "simulate", "save", "export_json", "export_anchor", "bam_config", "autofix"],
+        "elite": ["design", "simulate", "save", "export_json", "export_anchor", "bam_config", "deploy", "templates", "autofix"],
+        "whale": ["design", "simulate", "save", "export_json", "export_anchor", "bam_config", "deploy", "templates", "priority_support", "autofix"],
     }
 
     TIER_LIMITS = {
