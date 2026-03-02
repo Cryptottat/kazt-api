@@ -143,7 +143,7 @@ async def autofix_stream(
 
         try:
             from src.services.ai_client import chat
-            content = await chat(system=AUTOFIX_PROMPT, user_message=user_message, max_tokens=32000)
+            content = await chat(system=AUTOFIX_PROMPT, user_message=user_message, max_tokens=32000, timeout=300.0)
             fix_result = _extract_json(content)
 
             fixed_files = fix_result.get("files", [])
