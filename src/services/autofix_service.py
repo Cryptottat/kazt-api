@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 
 from src.utils.logger import logger
 from src.services.generate_service import _extract_json
-from src.services.build_service import build_and_validate
+from src.services.validate_service import validate_code
 
 
 MAX_ATTEMPTS = 5
@@ -202,15 +202,15 @@ async def autofix_stream(
 
             current_files = fixed_files
 
-            # Re-validate with real anchor build
+            # Re-validate
             yield {
                 "type": "validating",
                 "attempt": attempt,
                 "maxAttempts": MAX_ATTEMPTS,
-                "message": "Re-building with anchor build...",
+                "message": "Re-validating...",
             }
 
-            current_result = await build_and_validate(
+            current_result = await validate_code(
                 [{"path": f["path"], "content": f["content"], "language": f.get("language", "unknown")} for f in current_files]
             )
 
