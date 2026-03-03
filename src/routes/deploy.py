@@ -48,19 +48,19 @@ async def simulate_deploy(
     if not x_api_key:
         raise HTTPException(status_code=401, detail="API key required for deployment")
 
-    key_data = await auth_service.verify_api_key(x_api_key)
+    key_data = await auth_service.verify_and_refresh_tier(x_api_key)
     if not key_data:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     # 티어 체크 -- pro 이상만 배포 가능
-    tier_info = auth_service.get_tier_info(x_api_key)
+    tier = key_data.get("tier", "free")
     allowed_tiers = ("pro", "elite", "whale")
-    if tier_info["tier"] not in allowed_tiers:
+    if tier not in allowed_tiers:
         raise HTTPException(
             status_code=403,
             detail=(
                 f"Deployment requires Pro tier or above. "
-                f"Current tier: {tier_info['tier']}"
+                f"Current tier: {tier}"
             ),
         )
 
@@ -94,18 +94,18 @@ async def deploy_devnet(
     if not x_api_key:
         raise HTTPException(status_code=401, detail="API key required for deployment")
 
-    key_data = await auth_service.verify_api_key(x_api_key)
+    key_data = await auth_service.verify_and_refresh_tier(x_api_key)
     if not key_data:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    tier_info = auth_service.get_tier_info(x_api_key)
+    tier = key_data.get("tier", "free")
     allowed_tiers = ("pro", "elite", "whale")
-    if tier_info["tier"] not in allowed_tiers:
+    if tier not in allowed_tiers:
         raise HTTPException(
             status_code=403,
             detail=(
                 f"Deployment requires Pro tier or above. "
-                f"Current tier: {tier_info['tier']}"
+                f"Current tier: {tier}"
             ),
         )
 
